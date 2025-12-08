@@ -163,3 +163,47 @@ exports.updateCompany = async (req, res) => {
     }
   });
 };
+
+// DELETE company (and its images from Cloudinary)
+exports.deleteCompany = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1. Get the company to retrieve image URLs
+    const companyRes = await pool.query(
+      `SELECT logo_url, signature_url FROM public.company_details WHERE id = $1`,
+      [id]
+    );
+
+    if (companyRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Company not found' });
+    }
+
+    const { logo_url, signature_url } = companyRes.rows[0];
+
+    // 2. Delete images from Cloudinary (if they exist)
+    const deleteFromCloudinary = async (url) => {
+      if (!url) return;
+      try {
+        const publicId = url.split('/').pop().split('.')[0]; // extracts public_id
+        await cloudinary.uploader.destroy(`mnc_company/${publicId}`);
+      } catch (cloudErr) {
+        console.warn('Failed to delete image from Cloudinary:', cloudErr.message);
+        // We don't fail the whole delete just because Cloudinary cleanup failed
+      }
+    };
+
+    await Promise.all([
+      deleteFromCloudinary(logo_url),
+      deleteFromCloudinary(signature_url),
+    ]);
+
+    // 3. Delete record from database
+    await pool.query(`DELETE FROM public.company_details WHERE id = $1`, [id]);
+
+    res.json({ message: 'Company deleted successfully!', success: true });
+  } catch (err) {
+    console.error('Delete company error:', err);
+    res.status(500).json({ message: 'Failed to delete company' });
+  }
+};
