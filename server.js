@@ -7,7 +7,9 @@ const { storage } = require('./Config/cloudinary');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: '*'
+}));
 app.use(express.json({ limit: '50mb' })); // Only this — DO NOT use urlencoded!
 
 // CRITICAL: Let multer handle multipart forms
