@@ -111,14 +111,15 @@ exports.createBooking = async (req, res) => {
       through = 'DIRECT',
       destination = '',
       items,
-      subtotal = '0',
-      packing_amount = '0',
-      extra_amount = '0',
-      cgst_amount = '0',
-      sgst_amount = '0',
-      igst_amount = '0',
-      net_amount = '0',
-      bill_no: providedBillNo = ''
+      subtotal = 0,
+      packing_amount = 0,
+      extra_amount = 0,
+      cgst_amount = 0,
+      sgst_amount = 0,
+      igst_amount = 0,
+      net_amount = 0,
+      bill_no: providedBillNo = '',
+      company_name: companyName = 'NISHA TRADERS'
     } = req.body || {};
 
     if (!customer_name || !items) {
@@ -127,9 +128,7 @@ exports.createBooking = async (req, res) => {
 
     let finalBillNo = providedBillNo.trim().toUpperCase();
 
-    // If user didn't provide a bill_no → auto-generate using prefix logic
     if (!finalBillNo) {
-      const companyName = req.body.company_name || 'NISHA TRADERS'; // fallback
       const prefix = getCompanyInitials(companyName);
       const latestRes = await client.query(`
         SELECT bill_no FROM bookings 
@@ -145,7 +144,6 @@ exports.createBooking = async (req, res) => {
       finalBillNo = `${prefix}-${String(nextNum).padStart(3, '0')}`;
     }
 
-    // FINAL DUPLICATE CHECK (critical!)
     const dupCheck = await client.query('SELECT id FROM public.bookings WHERE UPPER(bill_no) = $1', [finalBillNo]);
     if (dupCheck.rows.length > 0) {
       await client.query('ROLLBACK');
@@ -155,7 +153,6 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Parse items
     let itemsArray;
     try {
       itemsArray = typeof items === 'string' ? JSON.parse(items) : items;
@@ -165,16 +162,15 @@ exports.createBooking = async (req, res) => {
     }
 
     const totalCases = itemsArray.reduce((sum, item) => sum + (parseInt(item.cases) || 0), 0);
-    const pdf_file = req.file ? req.file.buffer : null;
 
-    // Insert booking
+    // INSERT WITHOUT pdf_data
     const insertQuery = `
       INSERT INTO public.bookings (
         bill_no, customer_name, customer_address, customer_gstin, customer_place,
         customer_state_code, through, destination, no_of_cases, subtotal, packing_amount,
-        extra_amount, cgst_amount, sgst_amount, igst_amount, net_amount, items, pdf_data, created_at
+        extra_amount, cgst_amount, sgst_amount, igst_amount, net_amount, items, company_name, created_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW())
-      RETURNING id, bill_no
+      RETURNING id, bill_no, created_at
     `;
 
     const values = [
@@ -182,7 +178,7 @@ exports.createBooking = async (req, res) => {
       customer_state_code, through, destination || '', totalCases,
       parseFloat(subtotal), parseFloat(packing_amount), parseFloat(extra_amount),
       parseFloat(cgst_amount), parseFloat(sgst_amount), parseFloat(igst_amount),
-      parseFloat(net_amount), JSON.stringify(itemsArray), pdf_file
+      parseFloat(net_amount), JSON.stringify(itemsArray), companyName  // ← Added
     ];
 
     const result = await client.query(insertQuery, values);
@@ -202,16 +198,20 @@ exports.createBooking = async (req, res) => {
   }
 };
 
-// GET ALL BILLS
+// GET ALL BOOKINGS
 exports.getAllBookings = async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, bill_no, customer_name, customer_place, booking_date, net_amount, no_of_cases
+      SELECT id, bill_no, customer_name, customer_address, customer_gstin, 
+             customer_place, customer_state_code, through, destination, no_of_cases,
+             subtotal, packing_amount, extra_amount, cgst_amount, sgst_amount,
+             igst_amount, net_amount, items, created_at
       FROM public.bookings 
-      ORDER BY booking_date DESC, id DESC
+      ORDER BY created_at DESC
     `);
     res.json(result.rows);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: 'Failed to fetch bills' });
   }
 };
